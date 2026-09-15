@@ -2,9 +2,25 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const { execSync } = require('child_process');
 
 const PORT = process.env.CDP_PORT || 9333;
 const DICT_PATH = path.join(__dirname, 'dictionary.json');
+
+function isClineAppRunning() {
+  try {
+    const out = execSync('tasklist /FI "IMAGENAME eq cline-app.exe" /NH', { encoding: 'utf8', windowsHide: true });
+    return out.includes('cline-app.exe');
+  } catch (e) {
+    return false;
+  }
+}
+
+function cleanupSidecar() {
+  try {
+    execSync('powershell -NoProfile -Command "Get-Process -Name code-sidecar -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force }"', { windowsHide: true });
+  } catch (e) {}
+}
 
 function buildPayload() {
   const DICT = JSON.parse(fs.readFileSync(DICT_PATH, 'utf8'));
@@ -169,8 +185,15 @@ async function loop() {
       }
     } else {
       missingCount++;
-      // 当 Cline 客户端关闭且 15 秒内未连接时，自动退出
+      // 当 Cline 客户端关闭时，自动清理孤儿 sidecar 进程并退出守护
+      if (lastLog > 0) {
+        if (!isClineAppRunning()) {
+          cleanupSidecar();
+          process.exit(0);
+        }
+      }
       if (missingCount >= 5 && lastLog > 0) {
+        cleanupSidecar();
         process.exit(0);
       }
     }

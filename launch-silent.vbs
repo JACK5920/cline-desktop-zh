@@ -25,6 +25,14 @@ injectScript = zhDir & "\inject.js"
 Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
 Set colProcesses = objWMIService.ExecQuery("Select * from Win32_Process Where Name = 'cline-app.exe'")
 
+' 若主程序未运行但残留了孤儿 sidecar 进程，先清理残留
+Set colSidecars = objWMIService.ExecQuery("Select * from Win32_Process Where Name = 'code-sidecar.exe'")
+If colProcesses.Count = 0 And colSidecars.Count > 0 Then
+    For Each objSidecar In colSidecars
+        objSidecar.Terminate()
+    Next
+End If
+
 If colProcesses.Count > 0 Then
     WshShell.AppActivate "Cline"
 Else
