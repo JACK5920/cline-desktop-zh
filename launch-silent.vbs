@@ -8,7 +8,6 @@ appDir = FSO.GetParentFolderName(zhDir)
 exePath = appDir & "\cline-app.exe"
 
 If Not FSO.FileExists(exePath) Then
-    ' 回落到默认安装路径
     If FSO.FileExists("E:\Program Files\Cline\cline-app.exe") Then
         exePath = "E:\Program Files\Cline\cline-app.exe"
         appDir = "E:\Program Files\Cline"
@@ -21,6 +20,7 @@ If Not FSO.FileExists(exePath) Then
 End If
 
 injectScript = zhDir & "\inject.js"
+targetPort = "19333"
 
 Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
 Set colProcesses = objWMIService.ExecQuery("Select * from Win32_Process Where Name = 'cline-app.exe'")
@@ -33,13 +33,29 @@ If colProcesses.Count = 0 And colSidecars.Count > 0 Then
     Next
 End If
 
+' 检查当前运行中的 cline-app 是否已开启远程调试端口
+needsLaunch = True
 If colProcesses.Count > 0 Then
-    WshShell.AppActivate "Cline"
-Else
+    Set colWebViews = objWMIService.ExecQuery("Select * from Win32_Process Where Name = 'msedgewebview2.exe' and CommandLine like '%--remote-debugging-port=%'")
+    If colWebViews.Count > 0 Then
+        ' 已经开启了调试模式，直接激活窗口
+        WshShell.AppActivate "Cline"
+        needsLaunch = False
+    Else
+        ' 运行中的是未带调试参数的原版，先关闭旧进程以便热切换到中文版
+        For Each objProc In colProcesses
+            objProc.Terminate()
+        Next
+        WScript.Sleep 800
+        needsLaunch = True
+    End If
+End If
+
+If needsLaunch Then
     Set procEnv = WshShell.Environment("PROCESS")
-    procEnv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") = "--remote-debugging-port=9333 --lang=zh-CN"
+    procEnv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") = "--remote-debugging-port=" & targetPort & " --lang=zh-CN"
     procEnv("SILENT") = "1"
-    procEnv("CDP_PORT") = "9333"
+    procEnv("CDP_PORT") = targetPort
     
     WshShell.Run """" & exePath & """", 1, False
     WScript.Sleep 1500
@@ -57,7 +73,7 @@ Next
 If Not isNodeRunning Then
     Set procEnv = WshShell.Environment("PROCESS")
     procEnv("SILENT") = "1"
-    procEnv("CDP_PORT") = "9333"
+    procEnv("CDP_PORT") = targetPort
     
     nodeExe = "D:\Program Files\nodejs\node.exe"
     If Not FSO.FileExists(nodeExe) Then

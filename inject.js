@@ -4,7 +4,15 @@ const path = require('path');
 const http = require('http');
 const { execSync } = require('child_process');
 
-const PORT = process.env.CDP_PORT || 9333;
+const CANDIDATE_PORTS = [
+  process.env.CDP_PORT ? parseInt(process.env.CDP_PORT) : null,
+  19333,
+  19334,
+  19527,
+  9333
+].filter(Boolean);
+
+let activePort = CANDIDATE_PORTS[0];
 const DICT_PATH = path.join(__dirname, 'dictionary.json');
 
 function isClineAppRunning() {
@@ -132,15 +140,26 @@ function fetchJson(url) {
 }
 
 async function getTargets() {
-  let targets = await fetchJson(`http://127.0.0.1:${PORT}/json`);
-  const hasPage = targets.some(t => t.type === 'page' && t.webSocketDebuggerUrl);
-  if (!hasPage) {
-    const ipv6Targets = await fetchJson(`http://[::1]:${PORT}/json`);
-    if (ipv6Targets.some(t => t.type === 'page' && t.webSocketDebuggerUrl)) {
-      targets = ipv6Targets;
+  const portsToTry = [activePort, ...CANDIDATE_PORTS.filter(p => p !== activePort)];
+  for (const p of portsToTry) {
+    let targets = await fetchJson(`http://127.0.0.1:${p}/json`);
+    let page = targets.find(t => t.type === 'page' && t.webSocketDebuggerUrl);
+    if (!page) {
+      const ipv6Targets = await fetchJson(`http://[::1]:${p}/json`);
+      page = ipv6Targets.find(t => t.type === 'page' && t.webSocketDebuggerUrl);
+      if (page) targets = ipv6Targets;
+    }
+    if (page) {
+      if (activePort !== p) {
+        activePort = p;
+        if (!process.env.SILENT) {
+          console.log(`[cline-zh] 已自动切换/锁定到可用调试端口: ${p}`);
+        }
+      }
+      return targets;
     }
   }
-  return targets;
+  return [];
 }
 
 function injectOnce(wsUrl, payload) {
@@ -201,5 +220,5 @@ async function loop() {
   }
 }
 
-console.log('[cline-zh] Cline 汉化注入器已启动 (端口: ' + PORT + ')');
+console.log('[cline-zh] Cline 汉化注入器已启动 (首选端口: ' + activePort + ')');
 loop().catch(e => { console.error(e); process.exit(1); });
